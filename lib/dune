@@ -1,0 +1,11 @@
+(library
+ (name contruno)
+ (modules contruno)
+ (public_name contruno)
+ (libraries contruno.ask))
+
+(library
+ (name ask)
+ (modules ask)
+ (public_name contruno.ask)
+ (libraries mhttp-client letsencrypt))

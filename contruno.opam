@@ -1,0 +1,18 @@
+opam-version: "2.0"
+maintainer: "Robur <team@robur.coop>"
+authors: ["Robur <team@robur.coop>"]
+homepage: "https://github.com/robur-coop/contruno"
+dev-repo: "git+https://github.com/robur-coop/contruno.git"
+bug-reports: "https://github.com/robur-coop/contruno/issues"
+license: "MIT"
+
+depends: [
+  "ocaml" {>= "5.0.0"}
+]
+build: [
+  ["dune" "subst"] {dev}
+  ["dune" "build" "-p" name "-j" jobs]
+  ["dune" "runtest" "-p" name "-j" jobs] {with-test}
+]
+
+synopsis: "A TLS termination proxy as a unikernel"
