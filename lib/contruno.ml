@@ -273,3 +273,14 @@ let create ?(entries = []) ?(add = ignore) cfg ~production he =
   (t, { renewer; provisioner })
 
 let kill { renewer; provisioner } = Miou.cancel renewer; Miou.cancel provisioner
+
+let entries t =
+  Miou.Mutex.protect t.m0 @@ fun () ->
+  List.map (fun entry -> (entry.hostname, entry.chain)) t.entries
+
+let remove t hostname =
+  Miou.Mutex.protect t.m0 @@ fun () ->
+  t.entries <-
+    List.filter
+      (fun entry -> not (Domain_name.equal entry.hostname hostname))
+      t.entries

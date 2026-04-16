@@ -177,6 +177,10 @@ let rec terminate orphans =
       Result.iter_error on_error result;
       terminate orphans
 
+let _10m = 600_000_000_000
+
+exception Timeout
+
 let h2s_server_connection ~config ~user's_error_handler ?upgrade ~user's_handler
     flow =
   let read_buffer_size = config.H2.Config.read_buffer_size in
@@ -226,7 +230,22 @@ let h2s_server_connection ~config ~user's_error_handler ?upgrade ~user's_handler
   in
   let prm0 = Miou.async @@ fun () -> go (Miou.orphans ()) in
   let prm1 = B.run conn ~tags ~read_buffer_size ?upgrade flow in
-  Miou.await_exn prm1;
+  let prm2 =
+    Miou.async @@ fun () ->
+    Mkernel.sleep _10m;
+    H2.Server_connection.shutdown conn
+    (* NOTE(dinosaure): some connections can be kept for a long time, we ensure that they
+       don't take more than 10m. Also, if we still observe a memory leak, we should raise
+       instead of [H2.Server_connection.shutdown]. *)
+  in
+  begin match Miou.await_all [ prm1; prm2 ] with
+  | [ Ok (); Ok () ] -> ()
+  | [ Error exn; _ ] | [ _; Error exn ] ->
+      Logs.err (fun m ->
+          m "Unexpected exception from our h2 runner: %s"
+            (Printexc.to_string exn))
+  | _ -> assert false
+  end;
   stop := true;
   Miou.Mutex.protect mutex (fun () -> Miou.Condition.signal condition);
   Miou.await_exn prm0;

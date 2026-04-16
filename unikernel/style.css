@@ -1,0 +1,43 @@
+body {
+  font-family: monospace;
+  color: #333;
+  margin: 5% 0 0 15%;
+  width: min(600px, 45%);
+  line-height: 1.6;
+}
+a, a:visited { color: #333; text-decoration: none; font-weight: bold; }
+a:hover { text-decoration: underline; }
+h1 { margin-bottom: 0.2em; }
+h1 small { font-weight: normal; font-size: 0.5em; color: #888; }
+h2 { margin-top: 2em; }
+.domain { margin-bottom: 1.5em; }
+.domain-name { font-weight: bold; }
+.domain-meta { color: #888; font-size: 0.9em; }
+.expired { color: #c00; }
+.valid { color: #333; }
+.delete { color: #888; cursor: pointer; font-size: 0.85em; }
+.delete:hover { color: #c00; text-decoration: underline; }
+input[type=text] {
+  font-family: monospace;
+  font-size: 1em;
+  border: none;
+  border-bottom: 1px solid #333;
+  padding: 0.2em 0;
+  background: transparent;
+  color: #333;
+  outline: none;
+  width: 20em;
+}
+button, input[type=submit] {
+  font-family: monospace;
+  font-size: 1em;
+  background: none;
+  border: none;
+  font-weight: bold;
+  color: #333;
+  cursor: pointer;
+  padding: 0;
+}
+button:hover, input[type=submit]:hover { text-decoration: underline; }
+hr { border: none; border-top: 1px solid #ccc; margin-top: 3em; }
+@media (max-width: 700px) { body { margin: 5%; width: 90%; } }

@@ -7,6 +7,7 @@ module Blk = struct
 end
 
 module Fat = Mfat.Make (Blk)
+module Bos = Mfat_bos.Make (Blk)
 module RNG = Mirage_crypto_rng.Fortuna
 
 let ( let@ ) finally fn = Fun.protect ~finally fn
@@ -14,6 +15,7 @@ let ( let* ) = Result.bind
 let msg msg = `Msg msg
 let error_msgf fmt = Fmt.kstr (fun msg -> Error (`Msg msg)) fmt
 let ( / ) = Filename.concat
+let inhibit fn = try fn () with _exn -> ()
 let rng () = Mirage_crypto_rng_mkernel.initialize (module RNG)
 let rng = Mkernel.map rng Mkernel.[]
 
@@ -41,7 +43,7 @@ module Cfg = struct
     |> Object.finish
 
   let decode str = Jsont_bytesrw.decode_string json str |> Result.map_error msg
-  let _encode t = Jsont_bytesrw.encode_string json t |> Result.get_ok
+  let encode t = Jsont_bytesrw.encode_string json t |> Result.get_ok
 
   let pp ppf t =
     match t.protocol with
@@ -122,7 +124,7 @@ let cfgs_of_fs ?(has_an_entry = Fun.const true) fs =
   let without_certs = List.filter_map fn cfgs in
   (t, without_certs)
 
-let add fs hostname (certs, pk) =
+let add cfgs fs hostname (certs, pk) =
   let name = Domain_name.to_string hostname in
   let _ = Fat.mkdir fs name in
   let _ = Fat.remove fs (name / "pk.pem") in
@@ -133,10 +135,13 @@ let add fs hostname (certs, pk) =
     let* () = must_exist fs name in
     let* () = Fat.write fs (name / "pk.pem") pk in
     let* () = Fat.write fs (name / "certs.pem") certs in
-    Ok ()
+    let* str = Fat.read fs (name / "cfg.json") in
+    Cfg.decode str
   in
   match run () with
-  | Ok () -> ()
+  | Ok cfg ->
+      let key = Domain_name.to_string hostname in
+      Art.insert cfgs (Art.unsafe_key key) cfg
   | Error (`Msg msg) ->
       Logs.err (fun m ->
           m "Impossible to write a new entry (%a): %s" Domain_name.pp hostname
@@ -374,12 +379,16 @@ let getaddrinfo dns record domain_name =
   | `AAAA ->
       Result.map v6tov (Mnet_dns.getaddrinfo dns Dns.Rr_map.Aaaa domain_name)
 
-let run _quiet (cidrv4, gateway, ipv6) cfg production nameservers =
+let run _quiet (cidrv4, gateway, ipv6) cfg production nameservers admin_password
+    =
   let devices =
     let open Mkernel in
-    [ rng; Mnet.stack ~name:"service" ?gateway ~ipv6 cidrv4; fat ~name:"certs" ]
+    [
+      rng; Mnet.stack ~name:"service" ?gateway ~ipv6 cidrv4; fat ~name:"certs"
+    ; Mkernel_memtrace.block "memtrace"
+    ]
   in
-  Mkernel.(run devices) @@ fun rng (stack, tcp, udp) fs () ->
+  Mkernel.(run devices) @@ fun rng (stack, tcp, udp) fs _trace () ->
   let@ () = fun () -> Mirage_crypto_rng_mkernel.kill rng in
   let@ () = fun () -> Mnet.kill stack in
   let hed, he = Mnet_happy_eyeballs.create tcp in
@@ -400,9 +409,33 @@ let run _quiet (cidrv4, gateway, ipv6) cfg production nameservers =
       m "hostnames without certificates: @[<hov>%a@]"
         Fmt.(list ~sep:(any ",") Domain_name.pp)
         without_certs);
-  let t, daemon = Contruno.create ~entries ~add:(add fs) cfg ~production he in
+  let t, daemon =
+    Contruno.create ~entries ~add:(add cfgs fs) cfg ~production he
+  in
   let@ () = fun () -> Contruno.kill daemon in
   List.iter (Contruno.add t) without_certs;
+  let add_domain hostname destination port protocol =
+    let name = Domain_name.to_string hostname in
+    let cfg_value = { Cfg.destination; port; protocol } in
+    let _ = Fat.mkdir fs name in
+    begin match Fat.write fs (name / "cfg.json") (Cfg.encode cfg_value) with
+    | Ok () -> Contruno.add t hostname
+    | Error (`Msg msg) ->
+        Logs.err (fun m -> m "Impossible to write cfg.json for %s: %s" name msg)
+    end
+  in
+  let remove_domain name =
+    let key = Art.unsafe_key name in
+    inhibit (fun () -> Art.remove cfgs key);
+    match Bos.Dir.delete ~recurse:true fs (Fpath.v name) with
+    | Ok () -> ()
+    | Error (`Msg msg) ->
+        Logs.err (fun m -> m "Impossible to delete %s: %s" name msg)
+  in
+  let admin_env =
+    { Admin.contruno= t; add_domain; remove_domain; password= admin_password }
+  in
+  let _prm0 = Miou.async @@ fun () -> Admin.run tcp admin_env in
   let rec go orphans listen =
     clean_up orphans;
     let flow = Mnet.TCP.accept tcp listen in
@@ -629,6 +662,13 @@ let production =
   let open Arg in
   value & flag & info [ "production" ] ~doc ~docs:docs_acme
 
+let admin_password =
+  let doc = "Password for the admin panel (HTTP Basic Auth)." in
+  let open Arg in
+  required
+  & opt (some string) None
+  & info [ "admin-password" ] ~doc ~docv:"PASSWORD"
+
 let term =
   let open Term in
   const run
@@ -637,6 +677,7 @@ let term =
   $ setup_cfg
   $ production
   $ Mnet_cli.setup_nameservers ()
+  $ admin_password
 
 let cmd =
   let info =

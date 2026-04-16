@@ -14,3 +14,5 @@ val create :
   -> t * daemon
 
 val kill : daemon -> unit
+val entries : t -> ([ `host ] Domain_name.t * chain) list
+val remove : t -> [ `host ] Domain_name.t -> unit

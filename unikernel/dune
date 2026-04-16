@@ -1,23 +1,56 @@
 (executable
  (name main)
- (modules main hTTP)
+ (modules main hTTP admin documents)
  (link_flags :standard -cclib "-z solo5-abi=hvt")
- (libraries art logs.cli fmt.cli re logs.fmt emile mkernel mnet mnet-cli mnet-dns mfat mirage-crypto-rng-mkernel contruno cmdliner gmp)
+ (libraries
+  art
+  logs.cli
+  fmt.cli
+  re
+  logs.fmt
+  emile
+  mkernel
+  mnet
+  mnet-cli
+  mnet-dns
+  mfat
+  mfat.bos
+  fpath
+  mirage-crypto-rng-mkernel
+  contruno
+  cmdliner
+  gmp
+  vifu
+  base64
+  mirage-ptime
+  mkernel-memtrace)
  (foreign_stubs
-   (language c)
-   (names manifest)))
+  (language c)
+  (names manifest)))
+
+(executable
+ (name script)
+ (modules script)
+ (modes js)
+ (libraries fmt brr))
 
 (rule
  (targets manifest.c)
  (deps manifest.json)
- (enabled_if 
-   (= %{context_name} "solo5"))
+ (enabled_if
+  (= %{context_name} "solo5"))
  (action
-   (run solo5-elftool gen-manifest manifest.json manifest.c)))
+  (run solo5-elftool gen-manifest manifest.json manifest.c)))
 
 (rule
  (targets manifest.c)
  (enabled_if
-   (= %{context_name} "default"))
+  (= %{context_name} "default"))
  (action
-   (write-file manifest.c "")))
+  (write-file manifest.c "")))
+
+(rule
+ (targets documents.ml)
+ (deps style.css script.bc.js)
+ (action
+   (run mcrunch -l -f style_css:style.css -f script_js:script.bc.js -o documents.ml)))
