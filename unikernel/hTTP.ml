@@ -234,9 +234,13 @@ let h2s_server_connection ~config ~user's_error_handler ?upgrade ~user's_handler
     Miou.async @@ fun () ->
     Mkernel.sleep _10m;
     H2.Server_connection.shutdown conn
-    (* NOTE(dinosaure): some connections can be kept for a long time, we ensure that they
-       don't take more than 10m. Also, if we still observe a memory leak, we should raise
-       instead of [H2.Server_connection.shutdown]. *)
+    (* NOTE(dinosaure): some connections can be kept for a long time, we ensure
+       that they don't take more than 10m. Also, if we still observe a memory
+       leak, we should raise instead of [H2.Server_connection.shutdown].
+
+       TODO(dinosaure): I'm not really sure about that, imagine that we should
+       transmit a huge file and it takes 10m, we will shutdown a legitimate
+       long-term connection... *)
   in
   begin match Miou.await_all [ prm1; prm2 ] with
   | [ Ok (); Ok () ] -> ()
@@ -294,22 +298,28 @@ let alpn tls =
 let with_tls tls ?(config = `Both (H1.Config.default, H2.Config.default))
     ?error_handler:(user's_error_handler = default_error_handler) ?upgrade
     ~handler:user's_handler flow =
-  try
-    let flow = Mnet_tls.server_of_fd tls flow in
-    begin match (config, alpn flow) with
-    | `Both (_, config), Some "h2" | `H2 config, (Some "h2" | None) ->
-        h2s_server_connection ~config ~user's_error_handler ?upgrade
-          ~user's_handler flow
-    | `Both (config, _), Some "http/1.1"
-    | `HTTP_1_1 config, (Some "http/1.1" | None) ->
-        https_1_1_server_connection ~config ~user's_error_handler ?upgrade
-          ~user's_handler flow
-    | `Both _, None ->
-        failwith "No protocol specified during the ALPN negotiation"
-    | _, Some "acme-tls/1" -> Mnet_tls.close flow
-    | _, Some protocol -> Fmt.failwith "Unrecognized protocol: %S" protocol
-    end
-  with exn ->
-    Logs.err (fun m ->
-        m "Got a TLS error during the handshake: %s" (Printexc.to_string exn));
-    Mnet.TCP.close flow
+  match try Ok (Mnet_tls.server_of_fd tls flow) with exn -> Error exn with
+  | Error exn ->
+      Logs.err (fun m ->
+          m "Got a TLS error during the handshake: %s" (Printexc.to_string exn));
+      Mnet.TCP.close flow
+  | Ok tls_flow ->
+      begin try
+        match (config, alpn tls_flow) with
+        | `Both (_, config), Some "h2" | `H2 config, (Some "h2" | None) ->
+            h2s_server_connection ~config ~user's_error_handler ?upgrade
+              ~user's_handler tls_flow
+        | `Both (config, _), (Some "http/1.1" | None)
+        | `HTTP_1_1 config, (Some "http/1.1" | None) ->
+            https_1_1_server_connection ~config ~user's_error_handler ?upgrade
+              ~user's_handler tls_flow
+        | _, Some "acme-tls/1" -> Mnet_tls.close tls_flow
+        | _, Some protocol ->
+            Logs.warn (fun m -> m "Unrecognized ALPN protocol: %S" protocol);
+            Mnet_tls.close tls_flow
+      with exn ->
+        Logs.err (fun m ->
+            m "Got an exception while serving the TLS connection: %s"
+              (Printexc.to_string exn));
+        inhibit Mnet_tls.close tls_flow
+      end
