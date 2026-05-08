@@ -40,7 +40,7 @@ let postJson uri data =
     Fetch.Request.v ~init uri
   in
   let* _resp = Brr_io.Fetch.request req in
-  let uri = Brr.Uri.v (jstrf "/admin/") in
+  let uri = Brr.Window.location Brr.G.window in
   Brr.Window.set_location Brr.G.window uri;
   Fut.ok ()
 

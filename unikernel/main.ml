@@ -383,12 +383,9 @@ let run _quiet (cidrv4, gateway, ipv6) cfg production nameservers admin_password
     =
   let devices =
     let open Mkernel in
-    [
-      rng; Mnet.stack ~name:"service" ?gateway ~ipv6 cidrv4; fat ~name:"certs"
-    ; Mkernel_memtrace.block "memtrace"
-    ]
+    [ rng; Mnet.stack ~name:"service" ?gateway ~ipv6 cidrv4; fat ~name:"certs" ]
   in
-  Mkernel.(run devices) @@ fun rng (stack, tcp, udp) fs _trace () ->
+  Mkernel.(run devices) @@ fun rng (stack, tcp, udp) fs () ->
   let@ () = fun () -> Mirage_crypto_rng_mkernel.kill rng in
   let@ () = fun () -> Mnet.kill stack in
   let hed, he = Mnet_happy_eyeballs.create tcp in

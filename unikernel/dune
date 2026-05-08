@@ -22,8 +22,7 @@
   gmp
   vifu
   base64
-  mirage-ptime
-  mkernel-memtrace)
+  mirage-ptime)
  (foreign_stubs
   (language c)
   (names manifest)))
