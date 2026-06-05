@@ -175,8 +175,8 @@ let earliest_expiry entries =
   List.fold_left fn None entries
 
 let _1d = 86_400_000_000_000
+let _1h = 3_600_000_000_000
 let _5d = Option.get (Ptime.Span.of_d_ps (5, 0L))
-let secs_to_ns secs = secs * 1_000_000_000
 
 let sleep_until_renewal entries =
   match earliest_expiry entries with
@@ -186,15 +186,9 @@ let sleep_until_renewal entries =
       let target =
         match Ptime.sub_span expiry _5d with Some t -> t | None -> expiry
       in
-      let delay = Ptime.diff target now in
-      let secs = Ptime.Span.to_int_s delay in
-      match secs with
-      | Some secs when secs > 0 ->
-          Log.debug (fun m ->
-              m "Sleep %a until next renewal" Duration.pp
-                (Int64.of_int (secs_to_ns secs)));
-          Mkernel.sleep (secs_to_ns secs)
-      | _ -> ()
+      if Ptime.is_later target ~than:now
+      then Mkernel.wakeup ~at:target
+      else Mkernel.sleep _1h
     end
 
 let needs_renewal entry =
