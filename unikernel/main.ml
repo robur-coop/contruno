@@ -147,6 +147,12 @@ let add cfgs fs hostname (certs, pk) =
           m "Impossible to write a new entry (%a): %s" Domain_name.pp hostname
             msg)
 
+let is_connection_specific = function
+  | "connection" | "proxy-connection" | "keep-alive" | "transfer-encoding"
+  | "upgrade" ->
+      true
+  | _ -> false
+
 let v1v1 _cfg reqd flow =
   let request = H1.Reqd.request reqd in
   let hdrs = request.H1.Request.headers in
@@ -237,7 +243,10 @@ let v2v1 (host : Art.key) _cfg reqd flow =
     let hdrs =
       let fn name value acc =
         let name = String.lowercase_ascii name in
-        H2.Headers.add acc name value
+        (* NOTE(dinosaure): on [h2], some headers (about connection) are
+           forbidden. We filter them here. *)
+        if is_connection_specific name then acc
+        else H2.Headers.add acc name value
       in
       H1.Headers.fold ~f:fn ~init:H2.Headers.empty resp.headers
     in
