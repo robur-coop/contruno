@@ -28,8 +28,8 @@ let tls t =
       let certificates = `Single single in
       let tls = Tls.Config.server ~alpn_protocols ~certificates () in
       Result.to_option tls
-  | default :: rest ->
-      let certificates = `Multiple_default (default, rest) in
+  | default :: _ ->
+      let certificates = `Multiple_default (default, all) in
       let tls = Tls.Config.server ~alpn_protocols ~certificates () in
       Result.to_option tls
 
