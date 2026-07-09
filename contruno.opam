@@ -8,6 +8,17 @@ license: "MIT"
 
 depends: [
   "ocaml" {>= "5.0.0"}
+  "dune" {>= "3.0.0"}
+  "mirage-crypto-rng-mkernel"
+  "mkernel"
+  "vifu"
+  "ca-certs-nss"
+  "mirage-ptime"
+  "cattery"
+  "mfat"
+  "jws"
+  "letsencrypt" {>= "2.1.0"}
+  "flux"
 ]
 build: [
   ["dune" "subst"] {dev}
