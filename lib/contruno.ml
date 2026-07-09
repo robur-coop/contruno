@@ -192,9 +192,7 @@ let sleep_until_renewal entries =
       let target =
         match Ptime.sub_span expiry _5d with Some t -> t | None -> expiry
       in
-      if Ptime.is_later target ~than:now
-      then Mkernel.wakeup ~at:target
-      else Mkernel.sleep _1h
+      if Ptime.is_later target ~than:now then Mkernel.wakeup ~at:target
     end
 
 let needs_renewal entry =
@@ -251,6 +249,7 @@ let renewer t ~production he =
   let rec go () =
     sleep_until_renewal t.entries;
     renew_domains t ~production he;
+    if List.exists needs_renewal t.entries then Mkernel.sleep _1h;
     go ()
   in
   go
