@@ -71,7 +71,13 @@ let make_challenge_cert ~key_authorization domain =
     add Subject_alt_name (false, san)
       (singleton (Unsupported id_pe_acme) (true, full))
   in
-  let valid_from = Ptime.epoch and valid_until = Ptime.epoch in
+  let now = Mirage_ptime.now () in
+  let valid_from =
+    Option.value ~default:now (Ptime.sub_span now (Ptime.Span.of_int_s 3600))
+  in
+  let valid_until =
+    Option.value ~default:now (Ptime.add_span now (Ptime.Span.of_int_s 86_400))
+  in
   let* csr = X509.Signing_request.create dn priv in
   match
     X509.Signing_request.sign csr ~valid_from ~valid_until ~extensions:ext priv
