@@ -13,6 +13,7 @@
   mnet
   mnet-cli
   mnet-dns
+  mnet-dns.cli
   mfat
   mfat.bos
   fpath

@@ -11,29 +11,28 @@ let secure_peer = peer ~secure:true
 let inhibit fn v = try fn v with _exn -> ()
 
 module TCP = struct
-  type t = Mnet.TCP.flow
+  type t = Mnet.TCP.buffer Mnet.TCP.flow
 
-  let read = Mnet.TCP.read
+  let read flow bstr ~off ~len = Mnet.TCP.read_bigarray flow ~off ~len bstr
 
-  let write flow ?(off = 0) ?len str =
-    let default = String.length str - off in
-    let len = Option.value ~default len in
-    let tmp = Bytes.create len in
-    Bytes.blit_string str 0 tmp 0 len;
-    Mnet.TCP.write flow ~off:0 ~len (Bytes.unsafe_to_string tmp)
+  let writev flow bstrs =
+    let fn { Faraday.buffer; off; len } =
+      Mnet.TCP.write flow (Bstr.sub_string buffer ~off ~len)
+    in
+    List.iter fn bstrs
 
   let close = Mnet.TCP.close
   let shutdown = Mnet.TCP.shutdown
 end
 
-module TLS = struct
+module TLS = Runtime.Flow.Of_bytes (struct
   include Mnet_tls
 
   let write fd ?off ?len str =
     try write fd ?off ?len str with
     | Mnet_tls.Closed_by_peer -> raise Runtime.Flow.Closed_by_peer
     | exn -> raise exn
-end
+end)
 
 module H2_Server_connection = struct
   include H2.Server_connection
@@ -147,7 +146,7 @@ let https_1_1_server_connection ~config ~user's_error_handler ?upgrade
   let finally = inhibit Mnet_tls.close in
   let res = Miou.Ownership.create ~finally flow in
   Miou.Ownership.own res;
-  Miou.await_exn (A.run conn ~tags ~read_buffer_size ?upgrade flow);
+  Miou.await_exn (A.run conn ~tags ~read_buffer_size ?upgrade (TLS.make flow));
   Miou.Ownership.release res
 
 let rec clean_up orphans =
@@ -229,7 +228,7 @@ let h2s_server_connection ~config ~user's_error_handler ?upgrade ~user's_handler
         go orphans
   in
   let prm0 = Miou.async @@ fun () -> go (Miou.orphans ()) in
-  let prm1 = B.run conn ~tags ~read_buffer_size ?upgrade flow in
+  let prm1 = B.run conn ~tags ~read_buffer_size ?upgrade (TLS.make flow) in
   let prm2 =
     Miou.async @@ fun () ->
     Mkernel.sleep _10m;
@@ -298,12 +297,12 @@ let alpn tls =
 let with_tls tls ?(config = `Both (H1.Config.default, H2.Config.default))
     ?error_handler:(user's_error_handler = default_error_handler) ?upgrade
     ~handler:user's_handler flow =
-  match try Ok (Mnet_tls.server_of_fd tls flow) with exn -> Error exn with
-  | Error exn ->
+  match Mnet_tls.server_of_fd tls flow with
+  | exception exn ->
       Logs.err (fun m ->
           m "Got a TLS error during the handshake: %s" (Printexc.to_string exn));
       Mnet.TCP.close flow
-  | Ok tls_flow ->
+  | tls_flow ->
       begin try
         match (config, alpn tls_flow) with
         | `Both (_, config), Some "h2" | `H2 config, (Some "h2" | None) ->

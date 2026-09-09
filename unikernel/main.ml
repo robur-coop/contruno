@@ -357,8 +357,9 @@ let handler he cfgs _ reqd =
   | None -> invalid_request reqd
   | Some (_, None) -> not_found reqd
   | Some (host, Some cfg) when protocols_match cfg reqd ->
+      let kind = Mnet.TCP.buffer ~limit:(Some 0x20000) 0x800 in
       let result =
-        Mnet_happy_eyeballs.connect_ip he
+        Mnet_happy_eyeballs.connect_ip ~kind he
           [ (cfg.Cfg.destination, cfg.Cfg.port) ]
       in
       begin match result with
@@ -388,7 +389,7 @@ let getaddrinfo dns record domain_name =
   | `AAAA ->
       Result.map v6tov (Mnet_dns.getaddrinfo dns Dns.Rr_map.Aaaa domain_name)
 
-let run _quiet (cidrv4, gateway, ipv6) cfg production nameservers admin_password
+let run _quiet (cidrv4, gateway, ipv6, _) cfg production nameservers admin_password
     =
   let devices =
     let open Mkernel in
@@ -399,7 +400,8 @@ let run _quiet (cidrv4, gateway, ipv6) cfg production nameservers admin_password
   let@ () = fun () -> Mnet.kill stack in
   let hed, he = Mnet_happy_eyeballs.create tcp in
   let@ () = fun () -> Mnet_happy_eyeballs.kill hed in
-  let dns = Mnet_dns.create ~nameservers (udp, he) in
+  let stack = Mnet_dns.Transport.stack udp he in
+  let dns = Mnet_dns.create ~nameservers stack in
   Mnet_happy_eyeballs.inject he (getaddrinfo dns);
   let entries = entries_of_fs fs in
   Logs.debug (fun m ->
@@ -442,9 +444,10 @@ let run _quiet (cidrv4, gateway, ipv6) cfg production nameservers admin_password
     { Admin.contruno= t; add_domain; remove_domain; password= admin_password }
   in
   let _prm0 = Miou.async @@ fun () -> Admin.run tcp admin_env in
+  let kind = Mnet.TCP.direct in
   let rec go orphans listen =
     clean_up orphans;
-    let flow = Mnet.TCP.accept tcp listen in
+    let flow = Mnet.TCP.accept ~kind tcp listen in
     match Contruno.tls t with
     | Some tls ->
         let _ =
@@ -682,7 +685,7 @@ let term =
   $ Mnet_cli.setup
   $ setup_cfg
   $ production
-  $ Mnet_cli.setup_nameservers ()
+  $ Mnet_dns_cli.setup ()
   $ admin_password
 
 let cmd =
