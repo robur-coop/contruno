@@ -11,6 +11,12 @@ depends: [
   "dune" {>= "3.0.0" & build}
   "mirage-crypto-rng-mkernel"
   "mkernel"
+  "mnet-cli"
+  "mnet-dns"
+  "art"
+  "mhttp-client"
+  "emile"
+  "mnet-happy-eyeballs"
   "vifu"
   "ca-certs-nss"
   "mirage-ptime"
