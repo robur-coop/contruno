@@ -24,6 +24,7 @@ depends: [
   "mfat"
   "jws"
   "brr"
+  "mcrunch"
   "js_of_ocaml"
   "letsencrypt" {>= "2.1.0"}
   "unic" {build}
