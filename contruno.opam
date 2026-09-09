@@ -23,6 +23,8 @@ depends: [
   "cattery"
   "mfat"
   "jws"
+  "brr"
+  "js_of_ocaml"
   "letsencrypt" {>= "2.1.0"}
   "unic" {build}
   "mfetch" {build}
