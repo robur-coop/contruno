@@ -8,7 +8,7 @@ license: "MIT"
 
 depends: [
   "ocaml" {>= "5.0.0"}
-  "dune" {>= "3.0.0"}
+  "dune" {>= "3.0.0" & build}
   "mirage-crypto-rng-mkernel"
   "mkernel"
   "vifu"
@@ -18,12 +18,18 @@ depends: [
   "mfat"
   "jws"
   "letsencrypt" {>= "2.1.0"}
+  "unic" {build}
+  "mfetch" {build}
   "flux"
 ]
 build: [
-  ["dune" "subst"] {dev}
-  ["dune" "build" "-p" name "-j" jobs]
-  ["dune" "runtest" "-p" name "-j" jobs] {with-test}
+  [make "all"]
 ]
-
 synopsis: "A TLS termination proxy as a unikernel"
+pin-depends: [
+  [ "zarith.dev" "git+https://github.com/mirage/Zarith.git#df8969d9bb95cffca13e31a615189ab27ada0684" ]
+]
+x-mkernel-pre-build: [
+  ["mfetch" "fetch" "--with-dune-file" "--file=_mfetch"]
+  ["mfetch" "lock" "--file=_mfetch" "--output=_mfetch.locked"]
+]
