@@ -1,7 +1,7 @@
 module Blk = struct
   type t = Mkernel.Block.t
 
-  let pagesize = Mkernel.Block.pagesize
+  let pagesize = Mkernel.Block.sector_size
   let read = Mkernel.Block.atomic_read
   let write = Mkernel.Block.atomic_write
 end
