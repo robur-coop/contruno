@@ -81,7 +81,7 @@ let csr key hostnames =
       let host = Domain_name.to_string hostname in
       let dn =
         let open X509.Distinguished_name in
-        [ Relative_distinguished_name.singleton (CN host) ]
+        [ Relative_distinguished_name.singleton (CN (Common_name.v host)) ]
       in
       let san =
         let open X509.General_name in

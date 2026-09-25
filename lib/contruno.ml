@@ -62,7 +62,7 @@ let make_challenge_cert ~key_authorization domain =
   let name = Domain_name.to_string domain in
   let dn =
     let open X509.Distinguished_name in
-    [ Relative_distinguished_name.singleton (CN name) ]
+    [ Relative_distinguished_name.singleton (CN (Common_name.v name)) ]
   in
   let san = X509.General_name.(singleton DNS [ name ]) in
   let full = Asn.(encode (codec der S.octet_string)) solution in
