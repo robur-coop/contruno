@@ -53,4 +53,4 @@
  (targets documents.ml)
  (deps style.css script.bc.js)
  (action
-   (run mcrunch -l -f style_css:style.css -f script_js:script.bc.js -o documents.ml)))
+   (run mcrunch -s -f style_css:style.css -f script_js:script.bc.js -o documents.ml)))

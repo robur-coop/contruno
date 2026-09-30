@@ -262,8 +262,8 @@ let routes =
   let open Vifu.Type in
   [
     get (rel / "admin" /?? nil) --> dashboard
-  ; get (rel / "style.css" /?? nil) --> document Documents.style_css
-  ; get (rel / "script.js" /?? nil) --> document Documents.script_js
+  ; get (rel / "style.css" /?? nil) --> document [ Documents.style_css ]
+  ; get (rel / "script.js" /?? nil) --> document [ Documents.script_js ]
   ; post (json_encoding add_input_json) (rel / "admin" / "add" /?? nil)
     --> add_domain
   ; post (json_encoding delete_input_json) (rel / "admin" / "delete" /?? nil)
