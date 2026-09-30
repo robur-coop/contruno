@@ -165,7 +165,9 @@ let rec clean_up orphans =
 let rec terminate orphans =
   match Miou.care orphans with
   | None -> ()
-  | Some None -> Miou.yield (); terminate orphans
+  | Some None ->
+      Option.iter Miou.cancel (Miou.take orphans);
+      terminate orphans
   | Some (Some prm) ->
       let result = Miou.await prm in
       let on_error exn =
