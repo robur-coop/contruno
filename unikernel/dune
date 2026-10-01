@@ -23,7 +23,9 @@
   gmp
   vifu
   base64
-  mirage-ptime)
+  mirage-ptime
+  tally
+  tally-mnet)
  (foreign_stubs
   (language c)
   (names manifest)))

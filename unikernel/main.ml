@@ -19,6 +19,21 @@ let inhibit fn = try fn () with _exn -> ()
 let rng () = Mirage_crypto_rng_mkernel.initialize (module RNG)
 let rng = Mkernel.map rng Mkernel.[]
 
+let _gc_minor =
+  let measure () =
+    let stat = Gc.quick_stat () in
+    [
+      ( []
+      , [
+          ("minor_words", Float.to_int stat.Gc.minor_words)
+        ; ("promoted_words", Float.to_int stat.Gc.promoted_words)
+        ; ("major_words", Float.to_int stat.Gc.major_words)
+        ; ("minor_heap_size", (Gc.get ()).Gc.minor_heap_size)
+        ] )
+    ]
+  in
+  Tally.v "gc_minor" measure
+
 module Cfg = struct
   type t = { destination: Ipaddr.t; port: int; protocol: [ `HTTP_1_1 | `H2 ] }
 
@@ -389,13 +404,14 @@ let getaddrinfo dns record domain_name =
   | `AAAA ->
       Result.map v6tov (Mnet_dns.getaddrinfo dns Dns.Rr_map.Aaaa domain_name)
 
-let run _quiet (cidrv4, gateway, ipv6, _) cfg production nameservers admin_password
-    =
+let run _quiet (cidrv4, gateway, ipv6, _) cfg production nameservers
+    admin_password metrics =
+  let service = Mnet.stack ~name:"service" ?gateway ~ipv6 cidrv4 in
   let devices =
     let open Mkernel in
-    [ rng; Mnet.stack ~name:"service" ?gateway ~ipv6 cidrv4; fat ~name:"certs" ]
+    [ rng; service; metrics; fat ~name:"certs" ]
   in
-  Mkernel.(run devices) @@ fun rng (stack, tcp, udp) fs () ->
+  Mkernel.(run devices) @@ fun rng (stack, tcp, udp) _metrics fs () ->
   let@ () = fun () -> Mirage_crypto_rng_mkernel.kill rng in
   let@ () = fun () -> Mnet.kill stack in
   let hed, he = Mnet_happy_eyeballs.create tcp in
@@ -678,6 +694,60 @@ let admin_password =
   & opt (some string) None
   & info [ "admin-password" ] ~doc ~docv:"PASSWORD"
 
+let docs_metrics = "METRICS"
+
+let metrics_ipv4 =
+  let doc =
+    "The IPv4 address (with its prefix) of the metrics interface. If it is not \
+     specified (and a metrics destination is given), the metrics interface is \
+     configured via a DHCP server."
+  in
+  let cidr4 = Arg.conv (Ipaddr.V4.Prefix.of_string, Ipaddr.V4.Prefix.pp) in
+  let open Arg in
+  value
+  & opt (some cidr4) None
+  & info [ "metrics-ipv4" ] ~doc ~docs:docs_metrics ~docv:"CIDRV4"
+
+let metrics_ipv4_gateway =
+  let doc = "The IPv4 gateway of the metrics interface." in
+  let gateway4 = Arg.conv (Ipaddr.V4.of_string, Ipaddr.V4.pp) in
+  let open Arg in
+  value
+  & opt (some gateway4) None
+  & info [ "metrics-ipv4-gateway" ] ~doc ~docs:docs_metrics ~docv:"IPV4"
+
+let metrics =
+  let doc =
+    "The address of the Telegraf server which collects metrics. If it is not \
+     specified, metrics are not reported."
+  in
+  let pp ppf (ipaddr, port) = Fmt.pf ppf "%a:%d" Ipaddr.pp ipaddr port in
+  let addr = Arg.conv (Ipaddr.with_port_of_string ~default:8094, pp) in
+  let open Arg in
+  value
+  & opt (some addr) None
+  & info [ "metrics" ] ~doc ~docs:docs_metrics ~docv:"IPADDR"
+
+let name =
+  let doc = "The name of the unikernel." in
+  let open Arg in
+  value
+  & opt string "contruno"
+  & info [ "name" ] ~doc ~docs:docs_metrics ~docv:"NAME"
+
+let setup_metrics ipv4 gateway dst name =
+  let cfg = Option.map (fun ipv4 -> (ipv4, gateway)) ipv4 in
+  let dst, port =
+    match dst with
+    | Some (dst, port) -> (Some dst, Some port)
+    | None -> (None, None)
+  in
+  Tally_mnet.device ~device:"metrics" ~name cfg ?port dst
+
+let setup_metrics =
+  let open Term in
+  const setup_metrics $ metrics_ipv4 $ metrics_ipv4_gateway $ metrics $ name
+
 let term =
   let open Term in
   const run
@@ -687,6 +757,7 @@ let term =
   $ production
   $ Mnet_dns_cli.setup ()
   $ admin_password
+  $ setup_metrics
 
 let cmd =
   let info =
