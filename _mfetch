@@ -4,6 +4,8 @@ bin
 bstr
 ca-certs-nss
 cachet
+charrua
+charrua-client
 checkseum
 cstruct
 decompress
@@ -33,12 +35,15 @@ mirage-ptime
 mkernel
 mnet
 mnet-cli
+mnet-dhcp
 mnet-dns
 mnet-happy-eyeballs
 mnet-tls
 multipart_form
 prettym
 slice
+tally-mkernel
+tally-mnet
 tls
 unstrctrd
 uri
