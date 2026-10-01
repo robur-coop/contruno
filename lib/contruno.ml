@@ -13,14 +13,13 @@ type t = {
   ; condition: Miou.Condition.t
   ; cfg: Ask.cfg
   ; add: [ `host ] Domain_name.t -> chain -> unit
+  ; mutable tls: (chain list * Tls.Config.server option) option
 }
 
 and chain = X509.Certificate.t list * X509.Private_key.t
 and entry = { hostname: [ `host ] Domain_name.t; mutable chain: chain }
 
-let tls t =
-  let certs = List.map (fun entry -> entry.chain) t.entries in
-  let all = t.challenges @ certs in
+let tls all =
   let alpn_protocols = [ "h2"; "http/1.1"; "acme-tls/1" ] in
   match all with
   | [] -> None
@@ -32,6 +31,16 @@ let tls t =
       let certificates = `Multiple_default (default, all) in
       let tls = Tls.Config.server ~alpn_protocols ~certificates () in
       Result.to_option tls
+
+let tls t =
+  let certs = List.map (fun entry -> entry.chain) t.entries in
+  let all = t.challenges @ certs in
+  match t.tls with
+  | Some (all', tls) when List.equal ( == ) all all' -> tls
+  | Some _ | None ->
+      let tls = tls all in
+      t.tls <- Some (all, tls);
+      tls
 
 let known t hostname =
   let fn value = Domain_name.(equal (raw hostname) (raw value)) in
@@ -266,7 +275,9 @@ let create ?(entries = []) ?(add = ignore) cfg ~production he =
   let m0 = Miou.Mutex.create () in
   let m1 = Miou.Mutex.create () in
   let condition = Miou.Condition.create () in
-  let t = { entries; challenges; pending; m0; m1; condition; cfg; add } in
+  let t =
+    { entries; challenges; pending; m0; m1; condition; cfg; add; tls= None }
+  in
   let renewer = Miou.async (renewer t ~production he) in
   let provisioner = Miou.async (provisioner t ~production he) in
   (t, { renewer; provisioner })
