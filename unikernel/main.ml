@@ -339,8 +339,8 @@ let invalid_request reqd =
 
 let not_found reqd = respondf reqd ~status:`Not_found "Host not found\n"
 
-let internal_server_error reqd =
-  respondf reqd ~status:`Internal_server_error "Interval server error\n"
+let internal_server_error reqd fmt =
+  respondf reqd ~status:`Internal_server_error fmt
 
 let protocols_mismatch reqd =
   respondf reqd ~status:`Bad_request "Protocols mismatch\n"
@@ -384,7 +384,9 @@ let handler he cfgs _ reqd =
           Miou.Ownership.own res;
           transmit host cfg reqd flow;
           Miou.Ownership.release res
-      | Error _ -> internal_server_error reqd
+      | Error (`Msg msg) ->
+          internal_server_error reqd "Internal server error (%a:%d): %s"
+            Ipaddr.pp cfg.Cfg.destination cfg.Cfg.port msg
       end
   | Some (_, Some _) -> protocols_mismatch reqd
 
