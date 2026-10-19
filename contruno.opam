@@ -18,6 +18,7 @@ depends: [
   "mhttp-client"
   "emile"
   "mnet-happy-eyeballs"
+  "mnet" {>= "0.0.9"}
   "vifu"
   "ca-certs-nss"
   "mirage-ptime"

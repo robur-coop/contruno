@@ -406,9 +406,7 @@ let getaddrinfo dns record domain_name =
   | `AAAA ->
       Result.map v6tov (Mnet_dns.getaddrinfo dns Dns.Rr_map.Aaaa domain_name)
 
-let run _quiet (cidrv4, gateway, ipv6, _) cfg production nameservers
-    admin_password metrics =
-  let service = Mnet.stack ~name:"service" ?gateway ~ipv6 cidrv4 in
+let run _quiet service cfg production nameservers admin_password metrics =
   let devices =
     let open Mkernel in
     [ rng; service; metrics; fat ~name:"certs" ]
@@ -754,7 +752,7 @@ let term =
   let open Term in
   const run
   $ setup_logs
-  $ Mnet_cli.setup
+  $ Mnet_cli.setup "service"
   $ setup_cfg
   $ production
   $ Mnet_dns_cli.setup ()
