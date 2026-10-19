@@ -1,12 +1,13 @@
 (executable
  (name main)
- (modules main hTTP admin documents)
+ (modules main hTTP admin challenge documents)
  (link_flags :standard -cclib "-z solo5-abi=hvt")
  (libraries
   art
   logs.cli
   fmt.cli
   re
+  jws.jwt
   logs.fmt
   emile
   mkernel
@@ -30,9 +31,9 @@
   (language c)
   (names manifest)))
 
-(executable
- (name script)
- (modules script)
+(executables
+ (names script solver)
+ (modules script solver)
  (modes js)
  (libraries fmt brr))
 
@@ -53,6 +54,16 @@
 
 (rule
  (targets documents.ml)
- (deps style.css script.bc.js)
+ (deps style.css script.bc.js solver.bc.js)
  (action
-   (run mcrunch -s -f style_css:style.css -f script_js:script.bc.js -o documents.ml)))
+  (run
+   mcrunch
+   -s
+   -f
+   style_css:style.css
+   -f
+   script_js:script.bc.js
+   -f
+   challenge_js:solver.bc.js
+   -o
+   documents.ml)))
