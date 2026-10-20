@@ -136,9 +136,8 @@ let hmac t parts =
 
 let challenge_of t ~host req bucket =
   let user_agent = header req "user-agent" in
-  let accept_language = header req "accept-language" in
   let bucket = string_of_int (int_of_float bucket) in
-  let parts = [ "c"; host; req.ip; user_agent; accept_language; bucket ] in
+  let parts = [ "c"; host; req.ip; user_agent; bucket ] in
   Digestif.SHA256.to_hex (hmac t parts)
 
 let bucket () = now () /. _7d
