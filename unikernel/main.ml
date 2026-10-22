@@ -348,7 +348,7 @@ let protocols_mismatch reqd =
 let peer_of = function
   | `Tls flow ->
       let (ipaddr, _), _ = Mnet.TCP.peers (Mnet_tls.file_descr flow) in
-      Ipaddr.to_string ipaddr
+      ipaddr
 
 let forward he host cfg reqd =
   let kind = Mnet.TCP.buffer ~limit:(Some 0x20000) 0x800 in
@@ -364,10 +364,49 @@ let forward he host cfg reqd =
       transmit host cfg reqd flow;
       Miou.Ownership.release res
   | Error (`Msg msg) ->
+      Atomic.incr Stats.upstream_errors;
       internal_server_error reqd "Internal server error (%a:%d): %s" Ipaddr.pp
         cfg.Cfg.destination cfg.Cfg.port msg
 
-let handler he cfgs challenge flow reqd =
+let path_of_target target =
+  match String.index_opt target '?' with
+  | Some idx ->
+      let len = String.length target in
+      (String.sub target 0 idx, String.sub target (idx + 1) (len - idx - 1))
+  | None -> (target, "")
+
+let apophis_request ipaddr reqd =
+  let lowercase (k, v) = (String.lowercase_ascii k, v) in
+  let meth, target, headers =
+    match reqd with
+    | `V1 reqd ->
+        let req = H1.Reqd.request reqd in
+        let headers = H1.Headers.to_list req.H1.Request.headers in
+        (req.H1.Request.meth, req.H1.Request.target, headers)
+    | `V2 reqd ->
+        let req = H2.Reqd.request reqd in
+        let headers = H2.Headers.to_list req.H2.Request.headers in
+        (req.H2.Request.meth, req.H2.Request.target, headers)
+  in
+  let path, query = path_of_target target in
+  let headers = List.map lowercase headers in
+  let ip = Ipaddr.to_string ipaddr in
+  { Apophis.meth:> Apophis.meth; path; query; headers; ip }
+
+let respond reqd (status : Apophis.status) headers body =
+  match reqd with
+  | `V1 reqd ->
+      let headers = H1.Headers.of_list headers in
+      let resp = H1.Response.create ~headers (status :> H1.Status.t) in
+      H1.Reqd.respond_with_string reqd resp body
+  | `V2 reqd ->
+      let headers = H2.Headers.of_list headers in
+      let resp = H2.Response.create ~headers (status :> H2.Status.t) in
+      H2.Reqd.respond_with_string reqd resp body
+
+let now () = Ptime.to_float_s (Mirage_ptime.now ())
+
+let handler he cfgs apophis flow reqd =
   let host =
     match reqd with
     | `V1 reqd ->
@@ -394,14 +433,15 @@ let handler he cfgs challenge flow reqd =
   | None -> invalid_request reqd
   | Some (_, None) -> not_found reqd
   | Some (host, Some cfg) when protocols_match cfg reqd ->
-      begin match challenge with
+      begin match apophis with
       | None -> forward he host cfg reqd
-      | Some challenge -> begin
+      | Some apophis -> begin
           let ip = peer_of flow in
+          let req = apophis_request ip reqd in
           let host' = (host :> string) in
-          match Challenge.intercept challenge ~host:host' ~ip reqd with
+          match Apophis.intercept ~now apophis ~host:host' ~ip req with
           | `Forward -> forward he host cfg reqd
-          | `Responded -> ()
+          | `Respond (status, headers, body) -> respond reqd status headers body
         end
       end
   | Some (_, Some _) -> protocols_mismatch reqd
@@ -421,6 +461,25 @@ let getaddrinfo dns record domain_name =
   | `A -> Result.map v4tov (Mnet_dns.getaddrinfo dns Dns.Rr_map.A domain_name)
   | `AAAA ->
       Result.map v6tov (Mnet_dns.getaddrinfo dns Dns.Rr_map.Aaaa domain_name)
+
+let fcrdns dns ipaddr =
+  let dn = Ipaddr.to_domain_name ipaddr in
+  let* _, ptr = Mnet_dns.getaddrinfo dns Dns.Rr_map.Ptr dn in
+  let* hostname = Domain_name.host ptr in
+  let record = match ipaddr with Ipaddr.V4 _ -> `A | Ipaddr.V6 _ -> `AAAA in
+  let* ipaddrs = getaddrinfo dns record hostname in
+  if Ipaddr.Set.mem ipaddr ipaddrs then Ok hostname
+  else
+    error_msgf "%a does not resolve to %a" Domain_name.pp hostname Ipaddr.pp
+      ipaddr
+
+let fcrdns dns ipaddr =
+  match fcrdns dns ipaddr with
+  | Ok hostname -> Some hostname
+  | Error (`Msg msg) ->
+      Logs.debug (fun m ->
+          m "Reverse DNS of %a failed: %s" Ipaddr.pp ipaddr msg);
+      None
 
 let run _quiet service cfg production nameservers admin_password metrics
     challenge =
@@ -455,7 +514,7 @@ let run _quiet service cfg production nameservers admin_password metrics
           | Some secret -> secret
           | None -> Mirage_crypto_rng.generate 32
         in
-        Some (Challenge.v ~difficulty secret)
+        Some (Apophis.v ~fcrdns:(fcrdns dns) ~difficulty secret)
   in
   Logs.debug (fun m ->
       m "hostnames without certificates: @[<hov>%a@]"

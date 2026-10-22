@@ -1,6 +1,6 @@
 (executable
  (name main)
- (modules main hTTP admin challenge documents)
+ (modules main hTTP admin documents)
  (link_flags :standard -cclib "-z solo5-abi=hvt")
  (libraries
   art
@@ -26,14 +26,15 @@
   base64
   mirage-ptime
   tally
+  apophis
   tally-mnet)
  (foreign_stubs
   (language c)
   (names manifest)))
 
-(executables
- (names script solver)
- (modules script solver)
+(executable
+ (name script)
+ (modules script)
  (modes js)
  (libraries fmt brr))
 
@@ -54,7 +55,7 @@
 
 (rule
  (targets documents.ml)
- (deps style.css script.bc.js solver.bc.js)
+ (deps style.css script.bc.js)
  (action
   (run
    mcrunch
@@ -63,7 +64,5 @@
    style_css:style.css
    -f
    script_js:script.bc.js
-   -f
-   challenge_js:solver.bc.js
    -o
    documents.ml)))
