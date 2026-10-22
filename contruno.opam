@@ -32,6 +32,7 @@ depends: [
   "unic" {build}
   "mfetch" {build}
   "flux"
+  "apophis"
   "tally-mkernel"
   "tally-mnet"
 ]
