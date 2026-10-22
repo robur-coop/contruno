@@ -41,7 +41,7 @@ build: [
 synopsis: "A TLS termination proxy as a unikernel"
 pin-depends: [
   [ "zarith.dev" "git+https://github.com/mirage/Zarith.git#df8969d9bb95cffca13e31a615189ab27ada0684" ]
-  [ "apophis.dev" "git+https://git.robur.coop/robur/apophis.git#ea0559a9b5ea3ab8c8a0d7a31e55006ece63e4a3" ]
+  [ "apophis.dev" "git+https://git.robur.coop/robur/apophis.git#3079019095489aa34808553053fa5d57c052b841" ]
 ]
 x-mkernel-pre-build: [
   ["mfetch" "fetch" "--with-dune-file" "--file=_mfetch"]
