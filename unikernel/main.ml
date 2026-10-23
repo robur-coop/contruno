@@ -345,7 +345,67 @@ let internal_server_error reqd fmt =
 let protocols_mismatch reqd =
   respondf reqd ~status:`Bad_request "Protocols mismatch\n"
 
-let handler he cfgs _ reqd =
+let peer_of = function
+  | `Tls flow ->
+      let (ipaddr, _), _ = Mnet.TCP.peers (Mnet_tls.file_descr flow) in
+      ipaddr
+
+let forward he host cfg reqd =
+  let kind = Mnet.TCP.buffer ~limit:(Some 0x20000) 0x800 in
+  let result =
+    Mnet_happy_eyeballs.connect_ip ~kind he
+      [ (cfg.Cfg.destination, cfg.Cfg.port) ]
+  in
+  match result with
+  | Ok (_, flow) ->
+      let finally = Mnet.TCP.close in
+      let res = Miou.Ownership.create ~finally flow in
+      Miou.Ownership.own res;
+      transmit host cfg reqd flow;
+      Miou.Ownership.release res
+  | Error (`Msg msg) ->
+      internal_server_error reqd "Internal server error (%a:%d): %s" Ipaddr.pp
+        cfg.Cfg.destination cfg.Cfg.port msg
+
+let path_of_target target =
+  match String.index_opt target '?' with
+  | Some idx ->
+      let len = String.length target in
+      (String.sub target 0 idx, String.sub target (idx + 1) (len - idx - 1))
+  | None -> (target, "")
+
+let apophis_request ipaddr reqd =
+  let lowercase (k, v) = (String.lowercase_ascii k, v) in
+  let meth, target, headers =
+    match reqd with
+    | `V1 reqd ->
+        let req = H1.Reqd.request reqd in
+        let headers = H1.Headers.to_list req.H1.Request.headers in
+        (req.H1.Request.meth, req.H1.Request.target, headers)
+    | `V2 reqd ->
+        let req = H2.Reqd.request reqd in
+        let headers = H2.Headers.to_list req.H2.Request.headers in
+        (req.H2.Request.meth, req.H2.Request.target, headers)
+  in
+  let path, query = path_of_target target in
+  let headers = List.map lowercase headers in
+  let ip = Ipaddr.to_string ipaddr in
+  { Apophis.meth:> Apophis.meth; path; query; headers; ip }
+
+let respond reqd (status : Apophis.status) headers body =
+  match reqd with
+  | `V1 reqd ->
+      let headers = H1.Headers.of_list headers in
+      let resp = H1.Response.create ~headers (status :> H1.Status.t) in
+      H1.Reqd.respond_with_string reqd resp body
+  | `V2 reqd ->
+      let headers = H2.Headers.of_list headers in
+      let resp = H2.Response.create ~headers (status :> H2.Status.t) in
+      H2.Reqd.respond_with_string reqd resp body
+
+let now () = Ptime.to_float_s (Mirage_ptime.now ())
+
+let handler he cfgs apophis flow reqd =
   let host =
     match reqd with
     | `V1 reqd ->
@@ -372,21 +432,16 @@ let handler he cfgs _ reqd =
   | None -> invalid_request reqd
   | Some (_, None) -> not_found reqd
   | Some (host, Some cfg) when protocols_match cfg reqd ->
-      let kind = Mnet.TCP.buffer ~limit:(Some 0x20000) 0x800 in
-      let result =
-        Mnet_happy_eyeballs.connect_ip ~kind he
-          [ (cfg.Cfg.destination, cfg.Cfg.port) ]
-      in
-      begin match result with
-      | Ok (_, flow) ->
-          let finally = Mnet.TCP.close in
-          let res = Miou.Ownership.create ~finally flow in
-          Miou.Ownership.own res;
-          transmit host cfg reqd flow;
-          Miou.Ownership.release res
-      | Error (`Msg msg) ->
-          internal_server_error reqd "Internal server error (%a:%d): %s"
-            Ipaddr.pp cfg.Cfg.destination cfg.Cfg.port msg
+      begin match apophis with
+      | None -> forward he host cfg reqd
+      | Some apophis -> begin
+          let ip = peer_of flow in
+          let req = apophis_request ip reqd in
+          let host' = (host :> string) in
+          match Apophis.intercept ~now apophis ~host:host' ~ip req with
+          | `Forward -> forward he host cfg reqd
+          | `Respond (status, headers, body) -> respond reqd status headers body
+        end
       end
   | Some (_, Some _) -> protocols_mismatch reqd
 
@@ -406,7 +461,27 @@ let getaddrinfo dns record domain_name =
   | `AAAA ->
       Result.map v6tov (Mnet_dns.getaddrinfo dns Dns.Rr_map.Aaaa domain_name)
 
-let run _quiet service cfg production nameservers admin_password metrics =
+let fcrdns dns ipaddr =
+  let dn = Ipaddr.to_domain_name ipaddr in
+  let* _, ptr = Mnet_dns.getaddrinfo dns Dns.Rr_map.Ptr dn in
+  let* hostname = Domain_name.host ptr in
+  let record = match ipaddr with Ipaddr.V4 _ -> `A | Ipaddr.V6 _ -> `AAAA in
+  let* ipaddrs = getaddrinfo dns record hostname in
+  if Ipaddr.Set.mem ipaddr ipaddrs then Ok hostname
+  else
+    error_msgf "%a does not resolve to %a" Domain_name.pp hostname Ipaddr.pp
+      ipaddr
+
+let fcrdns dns ipaddr =
+  match fcrdns dns ipaddr with
+  | Ok hostname -> Some hostname
+  | Error (`Msg msg) ->
+      Logs.debug (fun m ->
+          m "Reverse DNS of %a failed: %s" Ipaddr.pp ipaddr msg);
+      None
+
+let run _quiet service cfg production nameservers admin_password metrics
+    challenge =
   let devices =
     let open Mkernel in
     [ rng; service; metrics; fat ~name:"certs" ]
@@ -429,6 +504,17 @@ let run _quiet service cfg production nameservers admin_password metrics =
     List.exists fn entries
   in
   let cfgs, without_certs = cfgs_of_fs ~has_an_entry fs in
+  let challenge =
+    match challenge with
+    | None -> None
+    | Some (difficulty, secret) ->
+        let secret =
+          match secret with
+          | Some secret -> secret
+          | None -> Mirage_crypto_rng.generate 32
+        in
+        Some (Apophis.v ~fcrdns:(fcrdns dns) ~difficulty secret)
+  in
   Logs.debug (fun m ->
       m "hostnames without certificates: @[<hov>%a@]"
         Fmt.(list ~sep:(any ",") Domain_name.pp)
@@ -468,7 +554,7 @@ let run _quiet service cfg production nameservers admin_password metrics =
     | Some tls ->
         let _ =
           Miou.async ~orphans @@ fun () ->
-          HTTP.with_tls tls flow ~handler:(handler he cfgs)
+          HTTP.with_tls tls flow ~handler:(handler he cfgs challenge)
         in
         go orphans listen
     | None ->
@@ -562,8 +648,14 @@ let setup_logs utf_8 style_renderer sources level =
 let setup_logs =
   Term.(const setup_logs $ utf_8 $ renderer $ setup_sources $ verbosity)
 
-let seed =
-  let parser str = Base64.decode str in
+let seed ?min () =
+  let parser str =
+    match (Base64.decode ~pad:false str, min) with
+    | (Error _ as err), _ -> err
+    | (Ok _ as value), None -> value
+    | Ok seed, Some min when String.length seed >= min -> Ok seed
+    | Ok _, Some len -> error_msgf "Too short seed (needs %d bytes)" len
+  in
   let pp = Fmt.(using Base64.encode_string string) in
   Arg.conv (parser, pp)
 
@@ -620,7 +712,7 @@ let certificate_seed =
   let doc = "The seed (base64 encoded) used for certificates." in
   let open Arg in
   value
-  & opt (some seed) None
+  & opt (some (seed ())) None
   & info [ "cert-seed" ] ~doc ~docs:docs_acme ~docv:"SEED"
 
 let certificate_key_type =
@@ -641,7 +733,7 @@ let account_seed =
   let doc = "The seed (base64 encoded) used for account." in
   let open Arg in
   value
-  & opt (some seed) None
+  & opt (some (seed ())) None
   & info [ "account-seed" ] ~doc ~docs:docs_acme ~docv:"SEED"
 
 let account_key_type =
@@ -748,6 +840,52 @@ let setup_metrics =
   let open Term in
   const setup_metrics $ metrics_ipv4 $ metrics_ipv4_gateway $ metrics $ name
 
+let docs_challenge = "ANUBIS"
+
+let challenge =
+  let doc =
+    "Protect all hostnames with a proof-of-work challenge (like Anubis): \
+     browsers must solve it before reaching the backend, well-known AI \
+     crawlers are denied."
+  in
+  let open Arg in
+  value & flag & info [ "challenge" ] ~doc ~docs:docs_challenge
+
+let challenge_difficulty =
+  let doc =
+    "The number of leading hexadecimal zeros required for the proof-of-work."
+  in
+  let difficulty =
+    let parser str =
+      match int_of_string_opt str with
+      | Some n when n >= 1 && n <= 64 -> Ok n
+      | _ -> error_msgf "Invalid difficulty (expected 1..64): %S" str
+    in
+    Arg.conv (parser, Fmt.int)
+  in
+  let open Arg in
+  value
+  & opt difficulty 4
+  & info [ "challenge-difficulty" ] ~doc ~docs:docs_challenge ~docv:"N"
+
+let challenge_secret =
+  let doc =
+    "The secret (base64 encoded) used to sign challenges and cookies. If it is \
+     not specified, a random one is generated at boot (and visitors must solve \
+     the challenge again after each restart)."
+  in
+  let open Arg in
+  value
+  & opt (some (seed ~min:32 ())) None
+  & info [ "challenge-secret" ] ~doc ~docs:docs_challenge ~docv:"SECRET"
+
+let setup_challenge enabled difficulty secret =
+  if enabled then Some (difficulty, secret) else None
+
+let setup_challenge =
+  let open Term in
+  const setup_challenge $ challenge $ challenge_difficulty $ challenge_secret
+
 let term =
   let open Term in
   const run
@@ -758,6 +896,7 @@ let term =
   $ Mnet_dns_cli.setup ()
   $ admin_password
   $ setup_metrics
+  $ setup_challenge
 
 let cmd =
   let info =

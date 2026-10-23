@@ -7,6 +7,7 @@
   logs.cli
   fmt.cli
   re
+  jws.jwt
   logs.fmt
   emile
   mkernel
@@ -25,6 +26,7 @@
   base64
   mirage-ptime
   tally
+  apophis
   tally-mnet)
  (foreign_stubs
   (language c)
@@ -55,4 +57,12 @@
  (targets documents.ml)
  (deps style.css script.bc.js)
  (action
-   (run mcrunch -s -f style_css:style.css -f script_js:script.bc.js -o documents.ml)))
+  (run
+   mcrunch
+   -s
+   -f
+   style_css:style.css
+   -f
+   script_js:script.bc.js
+   -o
+   documents.ml)))
