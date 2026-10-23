@@ -364,7 +364,6 @@ let forward he host cfg reqd =
       transmit host cfg reqd flow;
       Miou.Ownership.release res
   | Error (`Msg msg) ->
-      Atomic.incr Stats.upstream_errors;
       internal_server_error reqd "Internal server error (%a:%d): %s" Ipaddr.pp
         cfg.Cfg.destination cfg.Cfg.port msg
 
